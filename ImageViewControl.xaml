@@ -1,0 +1,68 @@
+<UserControl x:Class="TMTestWpfApp.ImageViewControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d">
+    <Border BorderBrush="Gray" BorderThickness="1" Background="White">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Background="#F8F8F8" Padding="8,5">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                               FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center"/>
+                    <StackPanel x:Name="ZoomToolbar" Grid.Column="1" Orientation="Horizontal"
+                                Visibility="Collapsed" VerticalAlignment="Center">
+                        <TextBlock x:Name="txtZoomLevel" Text="Fit" FontSize="10" Foreground="#555"
+                                   VerticalAlignment="Center" Margin="0,0,6,0" MinWidth="52"
+                                   TextAlignment="Right"/>
+                        <Button Content="−" Width="28" Height="22" Padding="0" Margin="0,0,2,0"
+                                ToolTip="축소 (휠↓)" Click="ZoomOut_Click"/>
+                        <Button Content="+" Width="28" Height="22" Padding="0" Margin="0,0,2,0"
+                                ToolTip="확대 (휠↑)" Click="ZoomIn_Click"/>
+                        <Button Content="Fit" Width="36" Height="22" Padding="0"
+                                ToolTip="맞춤 (더블클릭)" Click="ZoomFit_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid x:Name="ImageGrid" Grid.Row="1" ClipToBounds="True" Background="#FAFAFA"
+                  MouseLeftButtonDown="ImageGrid_MouseLeftButtonDown"
+                  MouseMove="ImageGrid_MouseMove"
+                  MouseLeftButtonUp="ImageGrid_MouseLeftButtonUp">
+                <Image x:Name="ImageDisplay" Stretch="Uniform" Margin="5"
+                       MouseMove="ImageDisplay_MouseMove"
+                       MouseLeave="ImageDisplay_MouseLeave"/>
+
+                <ScrollViewer x:Name="ZoomScroll" Margin="0" Visibility="Collapsed"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto"
+                              Background="#FAFAFA"
+                              PreviewMouseWheel="ZoomScroll_PreviewMouseWheel"
+                              MouseLeftButtonDown="ZoomScroll_MouseLeftButtonDown"
+                              MouseMove="ZoomScroll_MouseMove"
+                              MouseLeftButtonUp="ZoomScroll_MouseLeftButtonUp"
+                              MouseDoubleClick="ZoomScroll_MouseDoubleClick">
+                    <Image x:Name="ZoomImage" Stretch="Fill"
+                           RenderOptions.BitmapScalingMode="NearestNeighbor"
+                           SnapsToDevicePixels="True"/>
+                </ScrollViewer>
+
+                <Canvas x:Name="SelectionCanvas" IsHitTestVisible="False" Margin="5">
+                    <Rectangle x:Name="SelectionRect"
+                               Stroke="#FF2196F3" StrokeThickness="2"
+                               StrokeDashArray="4 2"
+                               Fill="#222196F3" Visibility="Collapsed"/>
+                </Canvas>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

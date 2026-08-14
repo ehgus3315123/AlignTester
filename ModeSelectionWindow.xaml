@@ -1,0 +1,28 @@
+<Window x:Class="TMTestWpfApp.ModeSelectionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Align 모드 선택" Height="380" Width="540"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
+    <Grid Margin="32">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Align 모드 선택" FontSize="22" FontWeight="Bold"/>
+        <TextBlock Grid.Row="1" Text="원하는 Align 모드를 선택하면 해당 모드의 설정 화면으로 이동합니다."
+                   FontSize="13" Foreground="#555555" Margin="0,6,0,20" TextWrapping="Wrap"/>
+
+        <StackPanel Grid.Row="2" VerticalAlignment="Center">
+            <Button x:Name="btnCoarse" Content="Coarse Align" FontSize="18" Padding="24,16" Margin="0,6"
+                    Click="Coarse_Click" MinHeight="56" Background="#E3F2FD"/>
+            <Button x:Name="btnFine" Content="Fine Align" FontSize="18" Padding="24,16" Margin="0,6"
+                    Click="Fine_Click" MinHeight="56" Background="#E8F5E9"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" Foreground="#888888" FontSize="11"
+                   Text="Coarse / Fine: 0.25× → 1.0× (매칭 배율 고정)"/>
+    </Grid>
+</Window>
