@@ -1,0 +1,17 @@
+<Window x:Class="TMTestWpfApp.LogWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Log" Height="560" Width="860"
+        WindowStartupLocation="CenterOwner"
+        Background="#F4F7FA">
+    <Border Margin="12" Background="#FFFFFF" BorderBrush="#DCE4EB" BorderThickness="1" CornerRadius="6">
+        <RichTextBox x:Name="txtLog" IsReadOnly="True" IsReadOnlyCaretVisible="True"
+                     FontFamily="Consolas" FontSize="15" Foreground="#1B2A3A"
+                     BorderThickness="0" Padding="18,16"
+                     Background="Transparent"
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Auto">
+            <FlowDocument PagePadding="0" LineHeight="30"/>
+        </RichTextBox>
+    </Border>
+</Window>

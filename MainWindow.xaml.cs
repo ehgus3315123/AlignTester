@@ -34,6 +34,8 @@ namespace TMTestWpfApp
 
         private readonly object _logLock = new object();
         private readonly List<string> _logBuffer = new List<string>();
+        private string _logDisplay = "";
+        private LogWindow _logWindow;
 
         private string _lastHistoryFolder;
         private string _batchRootFolder;
@@ -387,7 +389,7 @@ namespace TMTestWpfApp
             lstProcessSteps.ItemsSource = null;
             UpdateActionButtons();
             txtStatus.Text = DescribeLoadStatus();
-            txtLog.Text = string.Empty;
+            SetLogText(string.Empty);
         }
 
         private void LoadTemplate_Click(object sender, RoutedEventArgs e)
@@ -418,7 +420,7 @@ namespace TMTestWpfApp
             lstProcessSteps.ItemsSource = null;
             UpdateActionButtons();
             txtStatus.Text = DescribeLoadStatus();
-            txtLog.Text = string.Empty;
+            SetLogText(string.Empty);
         }
 
         private static void SetPathList(List<string> dest, IEnumerable<string> paths)
@@ -605,7 +607,7 @@ namespace TMTestWpfApp
 
             UpdateActionButtons();
             txtStatus.Text = $"Crop 완료: {sourceImage.Width} x {sourceImage.Height}";
-            txtLog.Text = string.Empty;
+            SetLogText(string.Empty);
         }
 
         // ---- Param reading ----
@@ -626,9 +628,12 @@ namespace TMTestWpfApp
 
         // ---- Logging ----
 
+        private static string Stamp(string msg) =>
+            $"[{DateTime.Now:HH:mm:ss.fff}] {msg}";
+
         private void AppendLog(string msg)
         {
-            lock (_logLock) _logBuffer.Add(msg);
+            lock (_logLock) _logBuffer.Add(Stamp(msg));
         }
 
         private string FlushLog()
@@ -638,6 +643,29 @@ namespace TMTestWpfApp
                 string text = string.Join(Environment.NewLine, _logBuffer);
                 _logBuffer.Clear();
                 return text;
+            }
+        }
+
+        private void SetLogText(string text)
+        {
+            _logDisplay = text ?? "";
+            _logWindow?.SetText(_logDisplay);
+        }
+
+        private void OpenLog_Click(object sender, RoutedEventArgs e)
+        {
+            if (_logWindow == null)
+            {
+                _logWindow = new LogWindow { Owner = this };
+                _logWindow.Closed += (_, __) => _logWindow = null;
+                _logWindow.SetText(_logDisplay);
+                _logWindow.Show();
+            }
+            else
+            {
+                if (_logWindow.WindowState == WindowState.Minimized)
+                    _logWindow.WindowState = WindowState.Normal;
+                _logWindow.Activate();
             }
         }
 
@@ -680,7 +708,7 @@ namespace TMTestWpfApp
             progressBar.Visibility = Visibility.Visible;
             progressBar.IsIndeterminate = true;
             txtStatus.Text = $"매칭 중... ({settings.Mode})";
-            txtLog.Text = string.Empty;
+            SetLogText(string.Empty);
             lstProcessSteps.ItemsSource = null;
             _batchRunning = true;
             SetUiEnabled(false);
@@ -729,7 +757,7 @@ namespace TMTestWpfApp
             if (caught != null)
             {
                 txtStatus.Text = "매칭 오류: " + caught.Message;
-                txtLog.Text = logText;
+                SetLogText(logText);
                 MatchHistory.WriteSummary(historyFolder, settings, config, results, logText);
                 return;
             }
@@ -769,8 +797,8 @@ namespace TMTestWpfApp
 
             var config = AlignPipeline.CreateConfig(settings, matchType, threshold);
             var batchLog = new StringBuilder();
-            batchLog.AppendLine($"Batch start {DateTime.Now:yyyy-MM-dd HH:mm:ss} jobs={_batchItems.Count} targets={_targetPaths.Count} templates={_templatePaths.Count}");
-            batchLog.AppendLine(AlignPipeline.DescribeFixedPipeline(settings));
+            batchLog.AppendLine(Stamp($"Batch start jobs={_batchItems.Count} targets={_targetPaths.Count} templates={_templatePaths.Count}"));
+            batchLog.AppendLine(Stamp(AlignPipeline.DescribeFixedPipeline(settings)));
 
             progressBar.Visibility = Visibility.Visible;
             progressBar.IsIndeterminate = false;
@@ -802,7 +830,7 @@ namespace TMTestWpfApp
                 item.StatusBrush = BatchRunBrush;
                 item.Detail = "매칭 중…";
                 txtStatus.Text = $"배치 매칭 {i + 1}/{_batchItems.Count} — {item.FileName}";
-                txtLog.Text = batchLog.ToString();
+                SetLogText(batchLog.ToString());
 
                 if (!TryShowJob(item))
                 {
@@ -812,7 +840,7 @@ namespace TMTestWpfApp
                     fail++;
                     done++;
                     progressBar.Value = done;
-                    batchLog.AppendLine($"[{i + 1}] FAIL load {item.FileName}");
+                    batchLog.AppendLine(Stamp($"[{i + 1}] FAIL load {item.FileName}"));
                     continue;
                 }
 
@@ -854,14 +882,14 @@ namespace TMTestWpfApp
                         item.StatusBrush = BatchOkBrush;
                         item.Detail = SummarizeFound(results);
                         ok++;
-                        batchLog.AppendLine($"[{i + 1}] OK {item.FileName} {item.Detail}");
+                        batchLog.AppendLine(Stamp($"[{i + 1}] OK {item.FileName} {item.Detail}"));
                     }
                     else
                     {
                         item.Status = "중단";
                         item.StatusBrush = BatchStopBrush;
                         item.Detail = caught?.Message ?? "중단됨";
-                        batchLog.AppendLine($"[{i + 1}] STOP {item.FileName}");
+                        batchLog.AppendLine(Stamp($"[{i + 1}] STOP {item.FileName}"));
                     }
                     done++;
                     progressBar.Value = done;
@@ -877,7 +905,7 @@ namespace TMTestWpfApp
                     item.Detail = caught?.Message ?? "결과 없음";
                     fail++;
                     MatchHistory.WriteSummary(historyFolder, settings, config, results, logText);
-                    batchLog.AppendLine($"[{i + 1}] FAIL {item.FileName} {item.Detail}");
+                    batchLog.AppendLine(Stamp($"[{i + 1}] FAIL {item.FileName} {item.Detail}"));
                 }
                 else
                 {
@@ -886,12 +914,12 @@ namespace TMTestWpfApp
                     item.StatusBrush = BatchOkBrush;
                     item.Detail = SummarizeFound(results);
                     ok++;
-                    batchLog.AppendLine($"[{i + 1}] OK {item.FileName} {item.Detail}");
+                    batchLog.AppendLine(Stamp($"[{i + 1}] OK {item.FileName} {item.Detail}"));
                 }
 
                 done++;
                 progressBar.Value = done;
-                txtLog.Text = batchLog.ToString();
+                SetLogText(batchLog.ToString());
             }
 
             try
@@ -910,7 +938,7 @@ namespace TMTestWpfApp
 
             string verb = stopped ? "중단" : "완료";
             txtStatus.Text = $"배치 {verb}: {ok} 성공 / {fail} 실패 / {_batchItems.Count} 전체. 저장: {_batchRootFolder}";
-            txtLog.Text = batchLog.ToString();
+            SetLogText(batchLog.ToString());
         }
 
         private void MarkRemainingStopped(int fromIndex)
@@ -967,7 +995,7 @@ namespace TMTestWpfApp
             progressBar.Visibility = Visibility.Visible;
             progressBar.IsIndeterminate = true;
             txtStatus.Text = "IntersectionPoint 계산 중...";
-            txtLog.Text = string.Empty;
+            SetLogText(string.Empty);
             lstProcessSteps.ItemsSource = null;
             _batchRunning = true;
             SetUiEnabled(false);
@@ -1008,9 +1036,9 @@ namespace TMTestWpfApp
 
             string logText = FlushLog();
             bool refined = Math.Abs(cx - seedX) > 1e-6 || Math.Abs(cy - seedY) > 1e-6;
-            string summary =
+            string summary = Stamp(
                 $"[IntersectionPoint] Dir={keyDir} ROI={tw}x{th} seed=({seedX:F2},{seedY:F2}) → " +
-                $"corner=({cx:F2},{cy:F2})" + (refined ? "" : " (unchanged — refine failed or skipped)");
+                $"corner=({cx:F2},{cy:F2})" + (refined ? "" : " (unchanged — refine failed or skipped)"));
             string combined = string.IsNullOrEmpty(logText) ? summary : logText + Environment.NewLine + summary;
 
             File.WriteAllText(Path.Combine(historyFolder, "summary.txt"), combined);
@@ -1019,14 +1047,14 @@ namespace TMTestWpfApp
             if (caught != null)
             {
                 txtStatus.Text = "IntersectionPoint 오류: " + caught.Message;
-                txtLog.Text = combined;
+                SetLogText(combined);
                 return;
             }
 
             txtStatus.Text = refined
                 ? $"IntersectionPoint 완료 ({cx:F2}, {cy:F2}). 저장: {historyFolder}"
                 : "IntersectionPoint 실패 — 템플릿 중심 유지. 로그/결과 폴더를 확인하세요.";
-            txtLog.Text = combined;
+            SetLogText(combined);
         }
 
         // ---- ConvertToEdge preview ----
@@ -1078,7 +1106,7 @@ namespace TMTestWpfApp
                 preSrc?.Dispose();
                 preTmpl?.Dispose();
                 txtStatus.Text = "ConvertToEdge 미리보기 오류: " + caught.Message;
-                txtLog.Text = logText;
+                SetLogText(logText);
                 return;
             }
 
@@ -1088,7 +1116,7 @@ namespace TMTestWpfApp
             preTmpl.Dispose();
 
             txtStatus.Text = "ConvertToEdge 미리보기 (이미지를 다시 로드하면 원본 복귀)";
-            txtLog.Text = logText;
+            SetLogText(logText);
         }
 
         // ---- Result rendering / saving ----
@@ -1099,12 +1127,12 @@ namespace TMTestWpfApp
             _lastResults = results;
 
             var sb = new StringBuilder();
-            sb.Append("[Result] ").Append(AlignPipeline.DescribeFixedPipeline(settings)).AppendLine();
+            sb.AppendLine(Stamp("[Result] " + AlignPipeline.DescribeFixedPipeline(settings)));
             if (config.UseEdgeCombined)
             {
-                sb.Append("        Edge/Normal weight: ")
-                  .Append(config.EdgeWeight.ToString("0.##", CultureInfo.InvariantCulture)).Append(" : ")
-                  .Append(config.NormalWeight.ToString("0.##", CultureInfo.InvariantCulture)).AppendLine();
+                sb.AppendLine(Stamp("        Edge/Normal weight: " +
+                    config.EdgeWeight.ToString("0.##", CultureInfo.InvariantCulture) + " : " +
+                    config.NormalWeight.ToString("0.##", CultureInfo.InvariantCulture)));
             }
 
             int executed = 0;
@@ -1114,7 +1142,7 @@ namespace TMTestWpfApp
             {
                 if (!r.Executed)
                 {
-                    sb.AppendLine($"  [x{r.Scale}] Skipped — {r.Note}");
+                    sb.AppendLine(Stamp($"  [x{r.Scale}] Skipped — {r.Note}"));
                     continue;
                 }
                 executed++;
@@ -1124,11 +1152,11 @@ namespace TMTestWpfApp
                 string note = string.IsNullOrEmpty(r.Note) ? "" : " " + r.Note;
                 if (r.UsedEdgeCombined)
                 {
-                    sb.AppendLine($"  [x{r.Scale}] {(r.IsFound ? "Found" : "NotFound")} Combined={r.Score:F6}/{threshold:F4} (Edge={r.EdgeScoreRaw:F6}, Normal={r.NormalScoreRaw:F6}) Time={r.ElapsedMs}ms Center=({r.CenterInOriginal.X:F1},{r.CenterInOriginal.Y:F1}) ROI=({r.RoiUsed.X},{r.RoiUsed.Y},{r.RoiUsed.Width},{r.RoiUsed.Height}){note}");
+                    sb.AppendLine(Stamp($"  [x{r.Scale}] {(r.IsFound ? "Found" : "NotFound")} Combined={r.Score:F6}/{threshold:F4} (Edge={r.EdgeScoreRaw:F6}, Normal={r.NormalScoreRaw:F6}) Time={r.ElapsedMs}ms Center=({r.CenterInOriginal.X:F1},{r.CenterInOriginal.Y:F1}) ROI=({r.RoiUsed.X},{r.RoiUsed.Y},{r.RoiUsed.Width},{r.RoiUsed.Height}){note}"));
                 }
                 else
                 {
-                    sb.AppendLine($"  [x{r.Scale}] {(r.IsFound ? "Found" : "NotFound")} Score={r.Score:F6}/{threshold:F4} Time={r.ElapsedMs}ms Center=({r.CenterInOriginal.X:F1},{r.CenterInOriginal.Y:F1}) ROI=({r.RoiUsed.X},{r.RoiUsed.Y},{r.RoiUsed.Width},{r.RoiUsed.Height}){note}");
+                    sb.AppendLine(Stamp($"  [x{r.Scale}] {(r.IsFound ? "Found" : "NotFound")} Score={r.Score:F6}/{threshold:F4} Time={r.ElapsedMs}ms Center=({r.CenterInOriginal.X:F1},{r.CenterInOriginal.Y:F1}) ROI=({r.RoiUsed.X},{r.RoiUsed.Y},{r.RoiUsed.Width},{r.RoiUsed.Height}){note}"));
                 }
             }
 
@@ -1154,7 +1182,7 @@ namespace TMTestWpfApp
             LoadProcessSteps(historyFolder);
 
             txtStatus.Text = $"[{settings.Mode}] 완료: 실행 {executed}/{results.Count}, Found {found}/{executed}. 저장: {historyFolder}";
-            txtLog.Text = combinedLog;
+            SetLogText(combinedLog);
         }
 
         private void SaveConvertToEdgePreview(string subDir)

@@ -84,6 +84,9 @@
                         Background="#1F5C7A" Foreground="White" FontWeight="Bold" MinWidth="120"/>
                 <Button Name="btnStopBatch" Content="중단" Click="StopBatch_Click" IsEnabled="False"
                         Background="#FDECEC" Foreground="#B71C1C" MinWidth="72"/>
+                <Border Style="{StaticResource SectionDivider}"/>
+                <Button Name="btnOpenLog" Content="Log" Click="OpenLog_Click" MinWidth="72"
+                        ToolTip="처리 로그를 별도 창으로 엽니다"/>
             </WrapPanel>
         </Border>
 
@@ -412,22 +415,16 @@
         </Grid>
 
         <!-- Status -->
-        <Border Grid.Row="2" Background="#FFFFFF" BorderBrush="#DCE4EB" BorderThickness="0,1,0,0" Padding="12,10">
+        <Border Grid.Row="2" Background="#FFFFFF" BorderBrush="#DCE4EB" BorderThickness="0,1,0,0" Padding="12,8">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="120"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <TextBlock x:Name="txtStatus" Grid.Row="0"
                            Text="대상과 템플릿 이미지를 로드한 뒤 실행을 누르세요."
                            FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0">
-                    <TextBlock x:Name="txtLog" Text=""
-                               FontFamily="Consolas" FontSize="12" Foreground="#555555"
-                               TextWrapping="Wrap"/>
-                </ScrollViewer>
-                <ProgressBar x:Name="progressBar" Grid.Row="2" Height="8" Margin="0,6,0,0"
+                <ProgressBar x:Name="progressBar" Grid.Row="1" Height="8" Margin="0,6,0,0"
                              Minimum="0" Maximum="100" Value="0" Visibility="Collapsed"/>
             </Grid>
         </Border>
