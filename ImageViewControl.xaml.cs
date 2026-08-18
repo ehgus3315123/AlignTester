@@ -22,6 +22,10 @@ namespace TMTestWpfApp
             DependencyProperty.Register(nameof(PixelZoomEnabled), typeof(bool), typeof(ImageViewControl),
                 new PropertyMetadata(false, OnPixelZoomEnabledChanged));
 
+        public static readonly DependencyProperty LockZoomProperty =
+            DependencyProperty.Register(nameof(LockZoom), typeof(bool), typeof(ImageViewControl),
+                new PropertyMetadata(false));
+
         public string Title
         {
             get => (string)GetValue(TitleProperty);
@@ -39,6 +43,13 @@ namespace TMTestWpfApp
         {
             get => (bool)GetValue(PixelZoomEnabledProperty);
             set => SetValue(PixelZoomEnabledProperty, value);
+        }
+
+        /// <summary>true면 새 이미지 로드 시 현재 Zoom 배율 유지.</summary>
+        public bool LockZoom
+        {
+            get => (bool)GetValue(LockZoomProperty);
+            set => SetValue(LockZoomProperty, value);
         }
 
         public event MouseEventHandler ImageMouseMove;
@@ -154,7 +165,7 @@ namespace TMTestWpfApp
                 _focusY = bmp.PixelHeight * 0.5;
                 _hasFocus = true;
             }
-            ResetZoomToFit();
+            ApplyZoomOnLoad();
         }
 
         /// <summary>줌 중심을 이미지 픽셀 좌표로 고정. 이후 확대/축소는 이 점 기준.</summary>
@@ -178,11 +189,29 @@ namespace TMTestWpfApp
                 _suppressSourceHook = true;
                 ZoomImage.Source = source;
                 _suppressSourceHook = false;
-                ResetZoomToFit();
+                ApplyZoomOnLoad();
             }
             else
             {
                 ImageDisplay.Source = source;
+            }
+        }
+
+        /// <summary>
+        /// 새 이미지 로드 시 Zoom 적용. LockZoom이면 현재 배율 유지(범위 재클램프),
+        /// 아니면 Fit으로 초기화.
+        /// </summary>
+        private void ApplyZoomOnLoad()
+        {
+            if (LockZoom && ZoomImage.Source is BitmapSource)
+            {
+                // 새 이미지 크기 기준으로 fitZoom 재계산 후 배율 클램프만 적용
+                _zoom = ClampZoom(_zoom);
+                ApplyZoom(keepFocus: true);
+            }
+            else
+            {
+                ResetZoomToFit();
             }
         }
 

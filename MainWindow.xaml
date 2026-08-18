@@ -141,7 +141,7 @@
                                         <ComboBoxItem Content="SQDIFF"/>
                                     </ComboBox>
                                     <TextBlock Text="Threshold" Style="{StaticResource FieldLabel}"/>
-                                    <TextBox x:Name="txtThreshold" Style="{StaticResource SidebarTextBox}" Text="0.8"/>
+                                    <TextBox x:Name="txtThreshold" Style="{StaticResource SidebarTextBox}" Text="0.7"/>
                                 </StackPanel>
                             </Border>
 
@@ -149,12 +149,8 @@
                             <Border x:Name="panelFineSettings" Style="{StaticResource Card}" Visibility="Collapsed">
                                 <StackPanel>
                                     <TextBlock Text="Fine 옵션" FontWeight="Bold" FontSize="13" Foreground="#1A3348"/>
-                                    <CheckBox x:Name="chkUseEdge" Style="{StaticResource SidebarCheck}"
-                                              Content="TemplateMatchUseEdge"
-                                              ToolTip="ConvertToEdge ⊕ Normal 가중 합산"
-                                              Checked="UseEdge_Changed" Unchecked="UseEdge_Changed"/>
-                                    <TextBlock Text="Gaussian → 7×7 box-gradient Edge"
-                                               FontSize="10" Foreground="#8A9AAB" Margin="22,0,0,4"/>
+                                    <TextBlock Text="Edge⊕Normal 가중 합산 (항상 적용)"
+                                               FontSize="11" Foreground="#8A9AAB" Margin="0,0,0,4"/>
 
                                     <StackPanel x:Name="panelEdgeWeights">
                                         <Grid>
@@ -176,9 +172,6 @@
 
                                     <TextBlock Text="FineAlignSearchSize (px)" Style="{StaticResource FieldLabel}"/>
                                     <TextBox x:Name="txtFineSearchSize" Style="{StaticResource SidebarTextBox}" Text="2000"/>
-                                    <CheckBox x:Name="chkUseMatchScale2" Style="{StaticResource SidebarCheck}"
-                                              Content="x1.0 후 x2.0 매칭"
-                                              ToolTip="x1.0 성공 후 동일 ROI를 2배 업스케일해 한 번 더 매칭"/>
                                 </StackPanel>
                             </Border>
 
@@ -201,6 +194,13 @@
                                               IsChecked="True"
                                               Checked="UseIntersection_Changed" Unchecked="UseIntersection_Changed"/>
                                     <StackPanel x:Name="panelKeyDir">
+                                        <TextBlock Text="RefineZoom" Style="{StaticResource FieldLabel}"/>
+                                        <ComboBox x:Name="cboRefineZoom" Style="{StaticResource SidebarCombo}" SelectedIndex="0"
+                                                  ToolTip="중심 crop을 확대한 이미지로 에지 탐색 (Off=줌 없음)">
+                                            <ComboBoxItem Content="Off"/>
+                                            <ComboBoxItem Content="2×"/>
+                                            <ComboBoxItem Content="4×"/>
+                                        </ComboBox>
                                         <TextBlock Text="AlignKeyDir" Style="{StaticResource FieldLabel}"/>
                                         <ComboBox x:Name="cboKeyDir" Style="{StaticResource SidebarCombo}" SelectedIndex="0">
                                             <ComboBoxItem Content="LeftTop"/>
@@ -208,6 +208,18 @@
                                             <ComboBoxItem Content="RightTop"/>
                                             <ComboBoxItem Content="RightBottom"/>
                                         </ComboBox>
+                                        <TextBlock Text="EdgeLevel  [0 ~ 255]" Style="{StaticResource FieldLabel}"
+                                                   ToolTip="Sobel 응답 임계값. 이 값 이상인 픽셀만 에지로 채택. (기본 60)"/>
+                                        <TextBox x:Name="txtEdgeLevel" Style="{StaticResource SidebarTextBox}" Text="60"
+                                                 LostFocus="txtEdgeLevel_LostFocus"/>
+                                        <TextBlock Text="EdgeInterval  [1 ~ 100]  px" Style="{StaticResource FieldLabel}"
+                                                   ToolTip="아웃라이어 제거 허용 범위(픽셀). 클수록 퍼진 에지도 포함. (기본 3)"/>
+                                        <TextBox x:Name="txtEdgeInterval" Style="{StaticResource SidebarTextBox}" Text="3"
+                                                 LostFocus="txtEdgeInterval_LostFocus"/>
+                                        <TextBlock Text="EdgeSearchRatio  [0.01 ~ 1.0]" Style="{StaticResource FieldLabel}"
+                                                   ToolTip="ROI 중 에지를 탐색할 비율. (기본 0.6667)"/>
+                                        <TextBox x:Name="txtEdgeSearchRatio" Style="{StaticResource SidebarTextBox}" Text="0.6667"
+                                                 LostFocus="txtEdgeSearchRatio_LostFocus"/>
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
@@ -391,14 +403,14 @@
                                                         CornerRadius="3" Padding="6,8" Cursor="Hand"
                                                         MouseLeftButtonUp="ProcessStepPart_Click"
                                                         Tag="{Binding FilePath}">
-                                                    <TextBlock Text="대상" FontSize="11" FontWeight="SemiBold"
+                                                    <TextBlock Text="{Binding LeftLabel}" FontSize="11" FontWeight="SemiBold"
                                                                Foreground="#1F5C7A" HorizontalAlignment="Center"/>
                                                 </Border>
                                                 <Border Grid.Column="2" Background="#EEF3F7" BorderBrush="#D5DEE6"
                                                         BorderThickness="1" CornerRadius="3" Padding="6,8" Cursor="Hand"
                                                         MouseLeftButtonUp="ProcessStepPart_Click"
                                                         Tag="{Binding RightFilePath}">
-                                                    <TextBlock Text="템플릿" FontSize="11" FontWeight="SemiBold"
+                                                    <TextBlock Text="{Binding RightLabel}" FontSize="11" FontWeight="SemiBold"
                                                                Foreground="#1F5C7A" HorizontalAlignment="Center"/>
                                                 </Border>
                                             </Grid>

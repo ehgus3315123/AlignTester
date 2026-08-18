@@ -11,55 +11,68 @@ using DRectangle = System.Drawing.Rectangle;
 
 namespace TMTestWpfApp
 {
-    /// <summary>처리 과정 패널용 이미지를 모아, 파이프라인 종료 시 한 번에 저장한다.</summary>
-    public sealed class ProcessImageQueue : IDisposable
+/// <summary>처리 과정 패널용 이미지를 모아, 파이프라인 종료 시 한 번에 저장한다.</summary>
+public sealed class ProcessImageQueue : IDisposable
+{
+    private readonly List<(string FileName, Mat Mat)> _items = new List<(string, Mat)>();
+
+    // ponytail: saveImages=false여도 UI 표시를 위해 항상 수집; Flush 시 폴더가 null이면 파일만 안 씀
+    public bool Enabled => true;
+
+    public ProcessImageQueue(bool enabled) { }
+
+    public void Add(string fileName, Mat src)
     {
-        private readonly List<(string FileName, Mat Mat)> _items = new List<(string, Mat)>();
-        public bool Enabled { get; }
+        if (src == null || src.IsEmpty || string.IsNullOrEmpty(fileName)) return;
+        _items.Add((fileName, src.Clone()));
+    }
 
-        public ProcessImageQueue(bool enabled)
+    public void Add(string fileName, Image<Gray, byte> img)
+    {
+        if (img == null) return;
+        Add(fileName, img.Mat);
+    }
+
+    public void Add(string fileName, Image<Bgr, byte> img)
+    {
+        if (img == null) return;
+        Add(fileName, img.Mat);
+    }
+
+    /// <summary>folder が null なら파일 저장 없이 리턴 (UI 인메모리 표시용 데이터는 유지됨).</summary>
+    public void Flush(string folder)
+    {
+        if (string.IsNullOrEmpty(folder) || _items.Count == 0) return;
+        try { Directory.CreateDirectory(folder); }
+        catch { return; }
+
+        for (int i = 0; i < _items.Count; i++)
         {
-            Enabled = enabled;
-        }
-
-        public void Add(string fileName, Mat src)
-        {
-            if (!Enabled || src == null || src.IsEmpty || string.IsNullOrEmpty(fileName)) return;
-            _items.Add((fileName, src.Clone()));
-        }
-
-        public void Add(string fileName, Image<Gray, byte> img)
-        {
-            if (img == null) return;
-            Add(fileName, img.Mat);
-        }
-
-        public void Add(string fileName, Image<Bgr, byte> img)
-        {
-            if (img == null) return;
-            Add(fileName, img.Mat);
-        }
-
-        public void Flush(string folder)
-        {
-            if (!Enabled || string.IsNullOrEmpty(folder) || _items.Count == 0) return;
-            try { Directory.CreateDirectory(folder); }
-            catch { return; }
-
-            for (int i = 0; i < _items.Count; i++)
-            {
-                try { CvInvoke.Imwrite(Path.Combine(folder, _items[i].FileName), _items[i].Mat); }
-                catch { /* ponytail: history write must not stop matching */ }
-            }
-        }
-
-        public void Dispose()
-        {
-            for (int i = 0; i < _items.Count; i++)
-                _items[i].Mat?.Dispose();
-            _items.Clear();
+            try { CvInvoke.Imwrite(Path.Combine(folder, _items[i].FileName), _items[i].Mat); }
+            catch { /* ponytail: history write must not stop matching */ }
         }
     }
+
+    /// <summary>이름으로 Mat을 찾는다. 없으면 null.</summary>
+    public Mat TryGet(string fileName)
+    {
+        for (int i = _items.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(_items[i].FileName, fileName, StringComparison.OrdinalIgnoreCase))
+                return _items[i].Mat;
+        }
+        return null;
+    }
+
+    public IReadOnlyList<(string FileName, Mat Mat)> Items => _items;
+
+    public void Dispose()
+    {
+        for (int i = 0; i < _items.Count; i++)
+            _items[i].Mat?.Dispose();
+        _items.Clear();
+    }
+}
 
     /// <summary>
     /// AlignService.SaveScale025MatchResult / SaveSearchArea / summary.txt 와 같은
@@ -135,7 +148,7 @@ namespace TMTestWpfApp
                 sb.AppendLine($"Pipeline={AlignPipeline.DescribeFixedPipeline(settings)}");
                 sb.AppendLine($"MatchType={config?.MatchType}");
                 sb.AppendLine($"Threshold={config?.ScoreThreshold.ToString("0.####", CultureInfo.InvariantCulture)}");
-                if (config != null && config.UseEdgeCombined)
+                if (config != null && config.Mode == AlignMode.Fine)
                 {
                     sb.AppendLine($"EdgeWeight={config.EdgeWeight.ToString("0.##", CultureInfo.InvariantCulture)}");
                     sb.AppendLine($"NormalWeight={config.NormalWeight.ToString("0.##", CultureInfo.InvariantCulture)}");
@@ -154,7 +167,7 @@ namespace TMTestWpfApp
                         }
 
                         string tag = r.IsFound ? "MATCH" : "NOMATCH";
-                        if (r.UsedEdgeCombined)
+                        if (r.EdgeScoreRaw != 0)
                         {
                             sb.AppendLine($"  [x{r.Scale}] {tag} Combined={r.Score:F6} Edge={r.EdgeScoreRaw:F6} Normal={r.NormalScoreRaw:F6} Center=({r.CenterInOriginal.X:F1},{r.CenterInOriginal.Y:F1}) ROI=({r.RoiUsed.X},{r.RoiUsed.Y},{r.RoiUsed.Width},{r.RoiUsed.Height}) {r.ElapsedMs}ms");
                         }
@@ -180,7 +193,6 @@ namespace TMTestWpfApp
         {
             if (Math.Abs(scale - 0.25) < 1e-9) return "x0.25";
             if (Math.Abs(scale - 1.0) < 1e-9) return "x1.0";
-            if (Math.Abs(scale - 2.0) < 1e-9) return "x2.0";
             return "x" + scale.ToString("0.##", CultureInfo.InvariantCulture);
         }
 
@@ -194,12 +206,6 @@ namespace TMTestWpfApp
         {
             SaveNormalAndEdge(searchCrop, shots, "Step3_SearchArea");
             SaveNormalAndEdge(template, shots, "Step3_Template");
-        }
-
-        public static void SavePreMatch2_0(Image<Gray, byte> searchScaled, Image<Gray, byte> templateScaled, ProcessImageQueue shots)
-        {
-            SaveNormalAndEdge(searchScaled, shots, "Step3_SearchArea2_0");
-            SaveNormalAndEdge(templateScaled, shots, "Step3_Template2_0");
         }
 
         private static void SaveNormalAndEdge(Image<Gray, byte> img, ProcessImageQueue shots, string stem)
@@ -268,8 +274,6 @@ namespace TMTestWpfApp
         /// </summary>
         public static void SaveRefineFitLines(
             Image<Gray, byte> matchCrop,
-            AlignKeyRefiner.FitLine2D lineV,
-            AlignKeyRefiner.FitLine2D lineH,
             System.Drawing.PointF intersection,
             ProcessImageQueue shots,
             string folder = null)
@@ -282,12 +286,7 @@ namespace TMTestWpfApp
             {
                 using (var vis = matchCrop.Convert<Bgr, byte>())
                 {
-                    var lineColorV = new MCvScalar(0, 220, 255);
-                    var lineColorH = new MCvScalar(255, 80, 255);
                     var cornerColor = new MCvScalar(0, 0, 255);
-
-                    DrawFitLine(vis, lineV, lineColorV);
-                    DrawFitLine(vis, lineH, lineColorH);
 
                     int cx = (int)Math.Round(intersection.X);
                     int cy = (int)Math.Round(intersection.Y);
@@ -313,6 +312,57 @@ namespace TMTestWpfApp
                         Directory.CreateDirectory(folder);
                         vis.Save(Path.Combine(folder, "Step4_RefineLines.bmp"));
                     }
+                }
+            }
+            catch
+            {
+                // ponytail: history write must not stop matching
+            }
+        }
+
+        /// <summary>
+        /// RefineAlignKeyCenter 세부 과정: matchCrop(ROI), edge points 시각화, FitLines + 교점.
+        /// </summary>
+        public static void SaveRefineDetail(
+            Image<Gray, byte> matchCrop,
+            System.Drawing.PointF intersection,
+            AlignKeyRefiner.FitLine2D lineV,
+            AlignKeyRefiner.FitLine2D lineH,
+            List<System.Drawing.PointF> edgesV,
+            List<System.Drawing.PointF> edgesH,
+            System.Drawing.RectangleF roi,
+            ProcessImageQueue shots)
+        {
+            if (shots == null || !shots.Enabled || matchCrop == null) return;
+            try
+            {
+                // matchCrop 원본
+                shots.Add("Step4_Refine_ROI.bmp", matchCrop);
+
+                using (var vis = matchCrop.Convert<Bgr, byte>())
+                {
+                    var vColor = new MCvScalar(255, 100, 0);   // blue-ish
+                    var hColor = new MCvScalar(0, 200, 0);     // green
+                    if (edgesV != null)
+                        foreach (var pt in edgesV)
+                            DrawCenterPixel(vis, (int)Math.Round(pt.X - roi.X), (int)Math.Round(pt.Y - roi.Y), vColor);
+                    if (edgesH != null)
+                        foreach (var pt in edgesH)
+                            DrawCenterPixel(vis, (int)Math.Round(pt.X - roi.X), (int)Math.Round(pt.Y - roi.Y), hColor);
+                    shots.Add("Step4_Refine_Edges.bmp", vis);
+                }
+
+                using (var vis = matchCrop.Convert<Bgr, byte>())
+                {
+                    DrawFitLine(vis, lineV, new MCvScalar(255, 100, 0));
+                    DrawFitLine(vis, lineH, new MCvScalar(0, 200, 0));
+
+                    int cx = (int)Math.Round(intersection.X);
+                    int cy = (int)Math.Round(intersection.Y);
+                    var red = new MCvScalar(0, 0, 255);
+                    CvInvoke.Circle(vis, new DPoint(cx, cy), 3, red, 1, LineType.AntiAlias);
+                    DrawCenterPixel(vis, cx, cy, red);
+                    shots.Add("Step4_Refine_FitLines.bmp", vis);
                 }
             }
             catch

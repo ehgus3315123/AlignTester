@@ -30,34 +30,29 @@ namespace TMTestWpfApp
             else
             {
                 txtTitle.Text = "Fine Align 설정";
-                txtSubtitle.Text = "FindAlignKey Fine — 0.25× → 1.0× (옵션 2.0×), optional ConvertToEdge 가중합산, Refine.";
+                txtSubtitle.Text = "FindAlignKey Fine — 0.25× → 1.0×, ConvertToEdge 가중합산, Refine.";
                 panelCoarse.Visibility = Visibility.Collapsed;
                 panelFine.Visibility = Visibility.Visible;
 
-                txtScales.Text = "1) 0.25×\r\n2) 1.0×\r\n3) (옵션) 2.0×\r\n4) (옵션) RefineAlignKeyCenter";
+                txtScales.Text = "1) 0.25×\r\n2) 1.0×\r\n3) (옵션) RefineAlignKeyCenter";
                 txtPipelineHint.Text =
                     "[FineAlignSearchSize 창] → MatchTemplate(x0.25)\r\n" +
                     "  → CRect(center, template+8) → x1.0\r\n" +
-                    "  → (옵션) CRect(center, template+8) → x2.0\r\n" +
                     "  → UseIntersectionPoint면 RefineAlignKeyCenter\r\n" +
-                    "UseEdge 시 각 스케일에서 Gaussian→ConvertToEdge⊕Normal 가중 합산.";
+                    "각 스케일에서 Gaussian→ConvertToEdge⊕Normal 가중 합산.";
 
                 if (restore != null && restore.Mode == AlignMode.Fine)
                 {
-                    chkUseEdge.IsChecked = restore.TemplateMatchUseEdge;
                     txtEdgeWeight.Text = restore.EdgeWeight.ToString("0.##", CultureInfo.InvariantCulture);
                     txtNormalWeight.Text = restore.NormalWeight.ToString("0.##", CultureInfo.InvariantCulture);
                     txtFineSearchSize.Text = restore.FineAlignSearchSize.ToString(CultureInfo.InvariantCulture);
-                    chkUseMatchScale2.IsChecked = restore.UseMatchScale2;
                 }
                 else
                 {
-                    chkUseEdge.IsChecked = true;
                     txtEdgeWeight.Text = "5";
                     txtNormalWeight.Text = "5";
                     txtFineSearchSize.Text = "2000";
                 }
-                UseEdge_Changed(null, null);
             }
 
             chkUseIntersection.IsChecked = restore?.UseIntersectionPoint ?? true;
@@ -73,18 +68,20 @@ namespace TMTestWpfApp
                     break;
                 }
             }
-        }
 
-        private void UseEdge_Changed(object sender, RoutedEventArgs e)
-        {
-            if (panelEdgeWeights != null)
-                panelEdgeWeights.IsEnabled = chkUseEdge?.IsChecked == true;
+            // RefineZoom: 0→index0, 2→index1, 4→index2
+            int zoom = restore?.RefineZoomFactor ?? 0;
+            cboRefineZoom.SelectedIndex = zoom == 4 ? 2 : zoom == 2 ? 1 : 0;
+
+            txtEdgeLevel.Text = (restore?.EdgeRefineLevel ?? 60).ToString(CultureInfo.InvariantCulture);
+            txtEdgeInterval.Text = (restore?.EdgeRefineInterval ?? 3).ToString(CultureInfo.InvariantCulture);
+            txtEdgeSearchRatio.Text = (restore?.EdgeSearchRatio ?? 0.6667).ToString("0.####", CultureInfo.InvariantCulture);
         }
 
         private void UseIntersection_Changed(object sender, RoutedEventArgs e)
         {
-            if (panelKeyDir != null)
-                panelKeyDir.IsEnabled = chkUseIntersection?.IsChecked == true;
+            if (panelRefineParams != null)
+                panelRefineParams.IsEnabled = chkUseIntersection?.IsChecked == true;
         }
 
         private void Back_Click(object sender, RoutedEventArgs e)
@@ -105,10 +102,30 @@ namespace TMTestWpfApp
                 keyDir = AlignKeyDir.LeftTop;
             s.KeyDir = keyDir;
 
+            int[] zoomMap = { 0, 2, 4 };
+            s.RefineZoomFactor = zoomMap[Math.Max(0, Math.Min(cboRefineZoom.SelectedIndex, 2))];
+
+            if (!int.TryParse(txtEdgeLevel.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int el) || el < 0 || el > 255)
+            {
+                MessageBox.Show("EdgeLevel은 0〜255 정수여야 합니다.");
+                return;
+            }
+            if (!int.TryParse(txtEdgeInterval.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int ei) || ei < 1)
+            {
+                MessageBox.Show("EdgeInterval은 1 이상의 정수여야 합니다.");
+                return;
+            }
+            if (!double.TryParse(txtEdgeSearchRatio.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double esr) || esr <= 0 || esr > 1)
+            {
+                MessageBox.Show("EdgeSearchRatio는 0 초과 1 이하의 실수여야 합니다.");
+                return;
+            }
+            s.EdgeRefineLevel = el;
+            s.EdgeRefineInterval = ei;
+            s.EdgeSearchRatio = esr;
+
             if (_mode == AlignMode.Fine)
             {
-                s.TemplateMatchUseEdge = chkUseEdge.IsChecked == true;
-
                 if (!double.TryParse(txtEdgeWeight.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double ew) || ew < 0)
                 {
                     MessageBox.Show("Edge Weight는 0 이상의 실수여야 합니다.");
@@ -119,7 +136,7 @@ namespace TMTestWpfApp
                     MessageBox.Show("Normal Weight는 0 이상의 실수여야 합니다.");
                     return;
                 }
-                if (s.TemplateMatchUseEdge && ew + nw <= 0)
+                if (ew + nw <= 0)
                 {
                     MessageBox.Show("Edge/Normal Weight 합이 0보다 커야 합니다.");
                     return;
@@ -132,7 +149,6 @@ namespace TMTestWpfApp
                 s.EdgeWeight = ew;
                 s.NormalWeight = nw;
                 s.FineAlignSearchSize = fss;
-                s.UseMatchScale2 = chkUseMatchScale2.IsChecked == true;
             }
 
             AlignSettings.Current = s;

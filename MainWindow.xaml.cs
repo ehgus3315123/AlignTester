@@ -33,7 +33,7 @@ namespace TMTestWpfApp
         private AlignSettings settings;
 
         private readonly object _logLock = new object();
-        private readonly List<string> _logBuffer = new List<string>();
+        private readonly List<LogEntry> _logEntries = new List<LogEntry>();
         private string _logDisplay = "";
         private LogWindow _logWindow;
 
@@ -49,28 +49,35 @@ namespace TMTestWpfApp
         private readonly ObservableCollection<BatchJobItem> _batchItems = new ObservableCollection<BatchJobItem>();
         private CancellationTokenSource _batchCts;
         private bool _batchRunning;
+        private ProcessImageQueue _lastShots;
 
         private const string ImageFilter = "Image files (*.png;*.bmp;*.jpg;*.jpeg)|*.png;*.bmp;*.jpg;*.jpeg|All files (*.*)|*.*";
         private static readonly string OutputRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "TMTestWpfApp", "MatchResult");
 
-        private sealed class ProcessStepItem
-        {
-            public string StepBadge { get; set; }
-            public string Title { get; set; }
-            public string Subtitle { get; set; }
-            public Brush BadgeBrush { get; set; }
-            public string FilePath { get; set; }
-            public string RightFilePath { get; set; }
-            public double FocusX { get; set; }
-            public double FocusY { get; set; }
-            public bool HasFocus { get; set; }
-            public Visibility PairPanelVisibility =>
-                string.IsNullOrEmpty(RightFilePath) ? Visibility.Collapsed : Visibility.Visible;
-            public Visibility SubtitleVisibility =>
-                string.IsNullOrEmpty(Subtitle) ? Visibility.Collapsed : Visibility.Visible;
-        }
+    private sealed class ProcessStepItem
+    {
+        public string StepBadge { get; set; }
+        public string Title { get; set; }
+        public string Subtitle { get; set; }
+        public Brush BadgeBrush { get; set; }
+        public string FilePath { get; set; }
+        public string RightFilePath { get; set; }
+        public string LeftLabel { get; set; } = "대상";
+        public string RightLabel { get; set; } = "템플릿";
+        public double FocusX { get; set; }
+        public double FocusY { get; set; }
+        public bool HasFocus { get; set; }
+        // ponytail: SaveProcessImages=false일 때 파일 없이 UI 표시용 인메모리 소스
+        public BitmapSource InMemorySource { get; set; }
+        public BitmapSource InMemoryRightSource { get; set; }
+        public Visibility PairPanelVisibility =>
+            string.IsNullOrEmpty(RightFilePath) && InMemoryRightSource == null
+                ? Visibility.Collapsed : Visibility.Visible;
+        public Visibility SubtitleVisibility =>
+            string.IsNullOrEmpty(Subtitle) ? Visibility.Collapsed : Visibility.Visible;
+    }
 
         private sealed class BatchJobItem : INotifyPropertyChanged
         {
@@ -152,13 +159,17 @@ namespace TMTestWpfApp
 
             txtSettingsMode.Text = fine ? "Fine Align" : "Coarse Align";
             txtSettingsSubtitle.Text = fine
-                ? "0.25× → 1.0× → (옵션) 2.0× · Edge · Refine"
+                ? "0.25× → 1.0× · Edge · Refine"
                 : "0.25× → 1.0× · Normal Match · Refine";
             txtPipelineHint.Text = fine
-                ? "SearchSize 창 → x0.25 → ROI(template+8) → x1.0 → (옵션) x2.0 → (옵션) FitLine 교점 Refine\nUseEdge 시 Edge⊕Normal 가중 합산"
+                ? "SearchSize 창 → x0.25 → ROI(template+8) → x1.0 → (옵션) FitLine 교점 Refine\nEdge⊕Normal 가중 합산"
                 : "전체 탐색 → x0.25 → ROI(template+8) → x1.0 → (옵션) FitLine 교점 Refine";
 
             chkUseIntersection.IsChecked = settings.UseIntersectionPoint;
+            cboRefineZoom.SelectedIndex = settings.RefineZoomFactor == 2 ? 1 : settings.RefineZoomFactor >= 4 ? 2 : 0;
+            txtEdgeLevel.Text = settings.EdgeRefineLevel.ToString(CultureInfo.InvariantCulture);
+            txtEdgeInterval.Text = settings.EdgeRefineInterval.ToString(CultureInfo.InvariantCulture);
+            txtEdgeSearchRatio.Text = settings.EdgeSearchRatio.ToString("0.####", CultureInfo.InvariantCulture);
             chkSaveImages.IsChecked = settings.SaveProcessImages;
             UseIntersection_Changed(null, null);
 
@@ -173,12 +184,9 @@ namespace TMTestWpfApp
 
             if (fine)
             {
-                chkUseEdge.IsChecked = settings.TemplateMatchUseEdge;
                 txtEdgeWeight.Text = settings.EdgeWeight.ToString("0.##", CultureInfo.InvariantCulture);
                 txtNormalWeight.Text = settings.NormalWeight.ToString("0.##", CultureInfo.InvariantCulture);
                 txtFineSearchSize.Text = settings.FineAlignSearchSize.ToString(CultureInfo.InvariantCulture);
-                chkUseMatchScale2.IsChecked = settings.UseMatchScale2;
-                UseEdge_Changed(null, null);
             }
         }
 
@@ -196,6 +204,7 @@ namespace TMTestWpfApp
             if (settings == null) return false;
 
             settings.UseIntersectionPoint = chkUseIntersection.IsChecked == true;
+            settings.RefineZoomFactor = cboRefineZoom.SelectedIndex == 1 ? 2 : cboRefineZoom.SelectedIndex == 2 ? 4 : 0;
             settings.SaveProcessImages = chkSaveImages.IsChecked == true;
 
             var dirItem = cboKeyDir.SelectedItem as ComboBoxItem;
@@ -203,10 +212,27 @@ namespace TMTestWpfApp
                 keyDir = AlignKeyDir.LeftTop;
             settings.KeyDir = keyDir;
 
+            if (!int.TryParse(txtEdgeLevel.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int el) || el < 0 || el > 255)
+            {
+                error = "EdgeLevel은 0〜255 정수여야 합니다.";
+                return false;
+            }
+            if (!int.TryParse(txtEdgeInterval.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int ei) || ei < 1)
+            {
+                error = "EdgeInterval은 1 이상의 정수여야 합니다.";
+                return false;
+            }
+            if (!double.TryParse(txtEdgeSearchRatio.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double esr) || esr <= 0 || esr > 1)
+            {
+                error = "EdgeSearchRatio는 0 초과 1 이하의 실수여야 합니다.";
+                return false;
+            }
+            settings.EdgeRefineLevel = el;
+            settings.EdgeRefineInterval = ei;
+            settings.EdgeSearchRatio = esr;
+
             if (settings.Mode == AlignMode.Fine)
             {
-                settings.TemplateMatchUseEdge = chkUseEdge.IsChecked == true;
-
                 if (!double.TryParse(txtEdgeWeight.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double ew) || ew < 0)
                 {
                     error = "Edge Weight는 0 이상의 실수여야 합니다.";
@@ -217,7 +243,7 @@ namespace TMTestWpfApp
                     error = "Normal Weight는 0 이상의 실수여야 합니다.";
                     return false;
                 }
-                if (settings.TemplateMatchUseEdge && ew + nw <= 0)
+                if (ew + nw <= 0)
                 {
                     error = "Edge/Normal Weight 합이 0보다 커야 합니다.";
                     return false;
@@ -230,23 +256,34 @@ namespace TMTestWpfApp
                 settings.EdgeWeight = ew;
                 settings.NormalWeight = nw;
                 settings.FineAlignSearchSize = fss;
-                settings.UseMatchScale2 = chkUseMatchScale2.IsChecked == true;
             }
 
             RefreshSettingsBanner();
             return true;
         }
 
-        private void UseEdge_Changed(object sender, RoutedEventArgs e)
-        {
-            if (panelEdgeWeights != null)
-                panelEdgeWeights.IsEnabled = chkUseEdge?.IsChecked == true;
-        }
-
         private void UseIntersection_Changed(object sender, RoutedEventArgs e)
         {
-            if (panelKeyDir != null)
-                panelKeyDir.IsEnabled = chkUseIntersection?.IsChecked == true;
+            bool on = chkUseIntersection?.IsChecked == true;
+            if (panelKeyDir != null) panelKeyDir.IsEnabled = on;
+        }
+
+        private void txtEdgeLevel_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (!int.TryParse(txtEdgeLevel.Text, out int v)) v = 60;
+            txtEdgeLevel.Text = Math.Max(0, Math.Min(255, v)).ToString();
+        }
+
+        private void txtEdgeInterval_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (!int.TryParse(txtEdgeInterval.Text, out int v)) v = 3;
+            txtEdgeInterval.Text = Math.Max(1, Math.Min(100, v)).ToString();
+        }
+
+        private void txtEdgeSearchRatio_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (!double.TryParse(txtEdgeSearchRatio.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double v)) v = 0.6667;
+            txtEdgeSearchRatio.Text = Math.Max(0.01, Math.Min(1.0, v)).ToString("0.####", CultureInfo.InvariantCulture);
         }
 
         [DllImport("gdi32.dll", EntryPoint = "DeleteObject")]
@@ -333,6 +370,22 @@ namespace TMTestWpfApp
         private void ShowProcessStep(ProcessStepItem item)
         {
             if (item == null) return;
+
+            // 인메모리 소스 우선 (SaveProcessImages=false일 때)
+            bool forceRight = !string.IsNullOrEmpty(_stepForcePath)
+                && _stepForcePath == item.RightFilePath;
+            BitmapSource memSrc = forceRight ? item.InMemoryRightSource
+                                              : (item.InMemorySource ?? item.InMemoryRightSource);
+            if (memSrc != null && string.IsNullOrEmpty(_stepForcePath))
+            {
+                bool useFocus = item.HasFocus;
+                if (useFocus)
+                    ResultImageView.SetSourceWithFocus(memSrc, item.FocusX, item.FocusY);
+                else
+                    ResultImageView.SetSourceWithFocus(memSrc, memSrc.PixelWidth * 0.5, memSrc.PixelHeight * 0.5);
+                return;
+            }
+
             string path = !string.IsNullOrEmpty(_stepForcePath) ? _stepForcePath : item.FilePath;
             if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
             try
@@ -615,14 +668,14 @@ namespace TMTestWpfApp
         private bool TryReadCommonParams(out TemplateMatchType matchType, out double threshold, out string error)
         {
             matchType = TemplateMatchType.CCORR;
-            threshold = 0.8;
+            threshold = 0.7;
             error = null;
             var typeItem = cboMatchType.SelectedItem as ComboBoxItem;
             string typeText = (typeItem?.Content as string) ?? "CCORR";
             if (!Enum.TryParse(typeText, out matchType))
             { error = $"알 수 없는 Type: {typeText}"; return false; }
             if (!double.TryParse(txtThreshold.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out threshold))
-            { error = "Threshold는 실수여야 합니다 (예: 0.8)"; return false; }
+            { error = "Threshold는 실수여야 합니다 (예: 0.7)"; return false; }
             return true;
         }
 
@@ -631,25 +684,27 @@ namespace TMTestWpfApp
         private static string Stamp(string msg) =>
             $"[{DateTime.Now:HH:mm:ss.fff}] {msg}";
 
-        private void AppendLog(string msg)
+        private void AppendLog(string msg) => AppendLog(msg, LogLevel.Info);
+
+        private void AppendLog(string msg, LogLevel level)
         {
-            lock (_logLock) _logBuffer.Add(Stamp(msg));
+            lock (_logLock) _logEntries.Add(new LogEntry(DateTime.Now, level, msg));
         }
 
         private string FlushLog()
         {
             lock (_logLock)
             {
-                string text = string.Join(Environment.NewLine, _logBuffer);
-                _logBuffer.Clear();
-                return text;
+                var entries = _logEntries.ToList();
+                _logEntries.Clear();
+                return string.Join(Environment.NewLine, entries.Select(e => e.ToStampedLine()));
             }
         }
 
         private void SetLogText(string text)
         {
             _logDisplay = text ?? "";
-            _logWindow?.SetText(_logDisplay);
+            _logWindow?.SetEntries(LogEntry.ParseLines(_logDisplay));
         }
 
         private void OpenLog_Click(object sender, RoutedEventArgs e)
@@ -658,7 +713,7 @@ namespace TMTestWpfApp
             {
                 _logWindow = new LogWindow { Owner = this };
                 _logWindow.Closed += (_, __) => _logWindow = null;
-                _logWindow.SetText(_logDisplay);
+                _logWindow.SetEntries(LogEntry.ParseLines(_logDisplay));
                 _logWindow.Show();
             }
             else
@@ -727,6 +782,7 @@ namespace TMTestWpfApp
 
             List<ScaleMatchResult> results = null;
             Exception caught = null;
+            ProcessImageQueue shots = null;
 
             try
             {
@@ -735,16 +791,21 @@ namespace TMTestWpfApp
                 using (var srcClone = sourceImage.Clone())
                 using (var tmplClone = templateImage.Clone())
                 {
+                    ProcessImageQueue bgShots = null;
                     await Task.Run(() =>
                     {
-                        results = matchingPipeline.Run(srcClone, tmplClone, config, AppendLog, historyFolder, settings.SaveProcessImages);
+                        results = matchingPipeline.Run(srcClone, tmplClone, config, AppendLog, historyFolder, settings.SaveProcessImages, out bgShots);
                     });
+                    shots = bgShots;
                 }
             }
             catch (Exception ex)
             {
                 caught = ex;
             }
+
+            _lastShots?.Dispose();
+            _lastShots = shots;
 
             progressBar.Visibility = Visibility.Collapsed;
             progressBar.IsIndeterminate = false;
@@ -770,7 +831,7 @@ namespace TMTestWpfApp
                 _batchItems[0].Detail = SummarizeFound(results);
             }
 
-            RenderResults(results, threshold, config, historyFolder, logText);
+            RenderResults(results, threshold, config, historyFolder, logText, shots);
         }
 
         private async Task RunBatchMatchAsync(TemplateMatchType matchType, double threshold)
@@ -854,16 +915,19 @@ namespace TMTestWpfApp
                 FlushLog();
                 List<ScaleMatchResult> results = null;
                 Exception caught = null;
+                ProcessImageQueue jobShots = null;
 
                 try
                 {
                     using (var srcClone = sourceImage.Clone())
                     using (var tmplClone = templateImage.Clone())
                     {
+                        ProcessImageQueue bgShots = null;
                         await Task.Run(() =>
                         {
-                            results = matchingPipeline.Run(srcClone, tmplClone, config, AppendLog, historyFolder, settings.SaveProcessImages);
+                            results = matchingPipeline.Run(srcClone, tmplClone, config, AppendLog, historyFolder, settings.SaveProcessImages, out bgShots);
                         });
+                        jobShots = bgShots;
                     }
                 }
                 catch (Exception ex)
@@ -871,13 +935,16 @@ namespace TMTestWpfApp
                     caught = ex;
                 }
 
+                _lastShots?.Dispose();
+                _lastShots = jobShots;
+
                 string logText = FlushLog();
 
                 if (ct.IsCancellationRequested)
                 {
                     if (results != null)
                     {
-                        RenderResults(results, threshold, config, historyFolder, logText);
+                        RenderResults(results, threshold, config, historyFolder, logText, jobShots);
                         item.Status = "완료";
                         item.StatusBrush = BatchOkBrush;
                         item.Detail = SummarizeFound(results);
@@ -909,7 +976,7 @@ namespace TMTestWpfApp
                 }
                 else
                 {
-                    RenderResults(results, threshold, config, historyFolder, logText);
+                    RenderResults(results, threshold, config, historyFolder, logText, jobShots);
                     item.Status = "완료";
                     item.StatusBrush = BatchOkBrush;
                     item.Detail = SummarizeFound(results);
@@ -1009,18 +1076,26 @@ namespace TMTestWpfApp
             _lastHistoryFolder = historyFolder;
 
             Exception caught = null;
+            ProcessImageQueue ipShots = null;
             try
             {
                 using (var srcClone = sourceImage.Clone())
                 {
+                    ProcessImageQueue bgShots = new ProcessImageQueue(true);
                     await Task.Run(() =>
                     {
                         double x = seedX, y = seedY;
                         AlignKeyRefiner.RefineAlignKeyCenter(
-                            srcClone, keyDir, tw, th, ref x, ref y, AppendLog, historyFolder, settings.SaveProcessImages);
+                            srcClone, keyDir, tw, th, ref x, ref y, AppendLog,
+                            settings.SaveProcessImages ? historyFolder : null,
+                            settings.SaveProcessImages, bgShots,
+                            zoomFactor: settings.RefineZoomFactor);
                         cx = x;
                         cy = y;
                     });
+                    if (settings.SaveProcessImages)
+                        bgShots.Flush(historyFolder);
+                    ipShots = bgShots;
                 }
             }
             catch (Exception ex)
@@ -1028,11 +1103,14 @@ namespace TMTestWpfApp
                 caught = ex;
             }
 
+            _lastShots?.Dispose();
+            _lastShots = ipShots;
+
             progressBar.Visibility = Visibility.Collapsed;
             progressBar.IsIndeterminate = false;
             _batchRunning = false;
             SetUiEnabled(true);
-            btnOpenHistory.IsEnabled = Directory.Exists(historyFolder);
+            btnOpenHistory.IsEnabled = settings.SaveProcessImages && Directory.Exists(historyFolder);
 
             string logText = FlushLog();
             bool refined = Math.Abs(cx - seedX) > 1e-6 || Math.Abs(cy - seedY) > 1e-6;
@@ -1041,8 +1119,13 @@ namespace TMTestWpfApp
                 $"corner=({cx:F2},{cy:F2})" + (refined ? "" : " (unchanged — refine failed or skipped)"));
             string combined = string.IsNullOrEmpty(logText) ? summary : logText + Environment.NewLine + summary;
 
-            File.WriteAllText(Path.Combine(historyFolder, "summary.txt"), combined);
-            LoadProcessSteps(historyFolder);
+            if (settings.SaveProcessImages)
+                File.WriteAllText(Path.Combine(historyFolder, "summary.txt"), combined);
+
+            if (!settings.SaveProcessImages && ipShots != null)
+                LoadProcessStepsFromQueue(ipShots);
+            else
+                LoadProcessSteps(historyFolder);
 
             if (caught != null)
             {
@@ -1052,7 +1135,8 @@ namespace TMTestWpfApp
             }
 
             txtStatus.Text = refined
-                ? $"IntersectionPoint 완료 ({cx:F2}, {cy:F2}). 저장: {historyFolder}"
+                ? $"IntersectionPoint 완료 ({cx:F2}, {cy:F2})"
+                    + (settings.SaveProcessImages ? $". 저장: {historyFolder}" : "")
                 : "IntersectionPoint 실패 — 템플릿 중심 유지. 로그/결과 폴더를 확인하세요.";
             SetLogText(combined);
         }
@@ -1122,13 +1206,14 @@ namespace TMTestWpfApp
         // ---- Result rendering / saving ----
 
         private void RenderResults(List<ScaleMatchResult> results, double threshold,
-            MatchingPipelineConfig config, string historyFolder, string processLog)
+            MatchingPipelineConfig config, string historyFolder, string processLog,
+            ProcessImageQueue shots = null)
         {
             _lastResults = results;
 
             var sb = new StringBuilder();
             sb.AppendLine(Stamp("[Result] " + AlignPipeline.DescribeFixedPipeline(settings)));
-            if (config.UseEdgeCombined)
+            if (config.Mode == AlignMode.Fine)
             {
                 sb.AppendLine(Stamp("        Edge/Normal weight: " +
                     config.EdgeWeight.ToString("0.##", CultureInfo.InvariantCulture) + " : " +
@@ -1150,7 +1235,7 @@ namespace TMTestWpfApp
                     found++;
 
                 string note = string.IsNullOrEmpty(r.Note) ? "" : " " + r.Note;
-                if (r.UsedEdgeCombined)
+                if (r.EdgeScoreRaw != 0)
                 {
                     sb.AppendLine(Stamp($"  [x{r.Scale}] {(r.IsFound ? "Found" : "NotFound")} Combined={r.Score:F6}/{threshold:F4} (Edge={r.EdgeScoreRaw:F6}, Normal={r.NormalScoreRaw:F6}) Time={r.ElapsedMs}ms Center=({r.CenterInOriginal.X:F1},{r.CenterInOriginal.Y:F1}) ROI=({r.RoiUsed.X},{r.RoiUsed.Y},{r.RoiUsed.Width},{r.RoiUsed.Height}){note}"));
                 }
@@ -1179,15 +1264,20 @@ namespace TMTestWpfApp
                 : processLog + Environment.NewLine + sb.ToString().TrimEnd();
 
             MatchHistory.WriteSummary(historyFolder, settings, config, results, combinedLog);
-            LoadProcessSteps(historyFolder);
 
-            txtStatus.Text = $"[{settings.Mode}] 완료: 실행 {executed}/{results.Count}, Found {found}/{executed}. 저장: {historyFolder}";
+            if (settings != null && !settings.SaveProcessImages && shots != null)
+                LoadProcessStepsFromQueue(shots);
+            else
+                LoadProcessSteps(historyFolder);
+
+            txtStatus.Text = $"[{settings.Mode}] 완료: 실행 {executed}/{results.Count}, Found {found}/{executed}"
+                + (settings.SaveProcessImages ? $". 저장: {historyFolder}" : "");
             SetLogText(combinedLog);
         }
 
         private void SaveConvertToEdgePreview(string subDir)
         {
-            if (settings?.Mode != AlignMode.Fine || !settings.TemplateMatchUseEdge) return;
+            if (settings?.Mode != AlignMode.Fine) return;
             if (!settings.SaveProcessImages) return;
 
             Image<Gray, byte> ps = null;
@@ -1227,10 +1317,7 @@ namespace TMTestWpfApp
             if (hasRefineOnly)
             {
                 txtProcessHeader.Text = "IntersectionPoint";
-                if (!AddStepIfExists(items, folder, "Step4_RefineLines.bmp", "IP", "RefineAlignKeyCenter",
-                        "교점 중심 50×50"))
-                    AddStepIfExists(items, folder, "Step4_RefineLines.jpg", "IP", "RefineAlignKeyCenter",
-                        "교점 중심 50×50");
+                AddRefineLinesStep(items, folder, "IP");
                 lstProcessSteps.ItemsSource = items;
                 if (items.Count > 0)
                     lstProcessSteps.SelectedIndex = 0;
@@ -1254,24 +1341,7 @@ namespace TMTestWpfApp
                     AddStepIfExists(items, folder, "Step3_Match1_0.jpg", "3", "1.0× 매칭", "매칭 영역 + 빨간 중심점",
                         focus: FocusInSearchImage(1.0));
                 }
-                AddSearchAreaPair(items, folder, "3", "×2.0",
-                    new[] { "Step3_SearchArea2_0", "Step3_Pre2_0" }, new[] { "Step3_Template2_0" });
-                if (!AddStepIfExists(items, folder, "Step3_Match2_0.bmp", "3", "2.0× 매칭", "업스케일 매칭 + 빨간 중심점",
-                        focus: FocusInSearchImage(2.0)))
-                {
-                    AddStepIfExists(items, folder, "Step3_Match2_0.jpg", "3", "2.0× 매칭", "업스케일 매칭 + 빨간 중심점",
-                        focus: FocusInSearchImage(2.0));
-                }
-                if (!AddStepIfExists(items, folder, "Step4_RefineLines.bmp", "4", "RefineAlignKeyCenter",
-                        "교점 중심 50×50"))
-                {
-                    if (!AddStepIfExists(items, folder, "Step4_RefineLines.jpg", "4", "RefineAlignKeyCenter",
-                            "교점 중심 50×50"))
-                    {
-                        AddStepIfExists(items, folder, "Step5_RefineLines.jpg", "4", "RefineAlignKeyCenter",
-                            "교점 중심 50×50");
-                    }
-                }
+                AddRefineLinesStep(items, folder, "4");
             }
             else
             {
@@ -1283,16 +1353,7 @@ namespace TMTestWpfApp
                 AddSearchAreaPair(items, folder, "3", "×1.0",
                     new[] { "Step3_SearchArea", "Step3_Pre1_0" }, new[] { "Step3_Template" });
                 AddLegacyMatch(items, folder, "x1.0", "4", "1.0× 매칭");
-                if (!AddStepIfExists(items, folder, "Step4_RefineLines.bmp", "R", "RefineAlignKeyCenter",
-                        "교점 중심 50×50"))
-                {
-                    if (!AddStepIfExists(items, folder, "Step4_RefineLines.jpg", "R", "RefineAlignKeyCenter",
-                            "교점 중심 50×50"))
-                    {
-                        AddStepIfExists(items, folder, "Step5_RefineLines.jpg", "R", "RefineAlignKeyCenter",
-                            "교점 중심 50×50");
-                    }
-                }
+                AddRefineLinesStep(items, folder, "R");
             }
 
             lstProcessSteps.ItemsSource = items;
@@ -1362,17 +1423,21 @@ namespace TMTestWpfApp
             List<ProcessStepItem> items, string folder, string fileName,
             string badge, string title, string subtitle,
             Brush badgeBrush = null,
-            (double x, double y)? focus = null)
+            (double x, double y)? focus = null,
+            string rightFileName = null)
         {
             string path = Path.Combine(folder, fileName);
             if (!File.Exists(path)) return false;
+            string rightPath = rightFileName != null ? Path.Combine(folder, rightFileName) : null;
+            if (rightPath != null && !File.Exists(rightPath)) rightPath = null;
             var item = new ProcessStepItem
             {
                 StepBadge = badge,
                 Title = title,
                 Subtitle = subtitle,
                 BadgeBrush = badgeBrush ?? StepBadgeBrush,
-                FilePath = path
+                FilePath = path,
+                RightFilePath = rightPath
             };
             if (focus.HasValue)
             {
@@ -1382,6 +1447,27 @@ namespace TMTestWpfApp
             }
             items.Add(item);
             return true;
+        }
+
+        private void AddRefineLinesStep(List<ProcessStepItem> items, string folder, string badge)
+        {
+            AddStepIfExists(items, folder, "Step4_Refine_ROI.bmp", badge, "Refine ROI", "매칭 영역 Crop",
+                rightFileName: "Step4_RefineInput.bmp");
+            AddStepIfExists(items, folder, "Step4_Refine_Edges.bmp", badge, "Refine Edges", "V(파랑) / H(초록) 에지 포인트");
+            AddStepIfExists(items, folder, "Step4_Refine_FitLines.bmp", badge, "Refine FitLines", "V/H FitLine + 교점(빨강)");
+
+            string[] candidates = { "Step4_RefineLines.bmp", "Step4_RefineLines.jpg", "Step5_RefineLines.jpg" };
+            foreach (var f in candidates)
+            {
+                if (AddStepIfExists(items, folder, f, badge, "Refine Result", "교점 중심 50×50",
+                        rightFileName: "Step4_RefineInput.bmp"))
+                {
+                    var last = items[items.Count - 1];
+                    last.LeftLabel = "Lines";
+                    last.RightLabel = "Input";
+                    return;
+                }
+            }
         }
 
         private void AddLegacyMatch(List<ProcessStepItem> items, string folder, string scaleTag, string badge, string title)
@@ -1400,6 +1486,121 @@ namespace TMTestWpfApp
             });
         }
 
+        /// <summary>파일 저장 없이 ProcessImageQueue의 인메모리 Mat으로 처리 과정 패널을 채운다.</summary>
+        private void LoadProcessStepsFromQueue(ProcessImageQueue shots)
+        {
+            var items = new List<ProcessStepItem>();
+            if (shots == null)
+            {
+                lstProcessSteps.ItemsSource = items;
+                return;
+            }
+
+            bool hasFineSteps = shots.TryGet("Step2_Match025.bmp") != null;
+            bool hasCoarseSearch = shots.TryGet("SearchArea_x0.25.bmp") != null;
+            bool hasRefineOnly = !hasFineSteps && !hasCoarseSearch
+                && shots.TryGet("Step4_RefineLines.bmp") != null;
+
+            if (hasRefineOnly)
+            {
+                txtProcessHeader.Text = "IntersectionPoint";
+                AddQueueRefineLinesStep(items, shots, "IP");
+            }
+            else if (hasFineSteps)
+            {
+                txtProcessHeader.Text = "Fine Align 과정";
+                AddQueueSearchAreaPair(items, shots, "1", "×0.25", new[] { "Step1_SearchArea" }, new[] { "Step1_Template" });
+                AddQueueItemIfExists(items, shots, "Step1_Edge_Target.bmp", "1", "Edge 변환", "대상 이미지");
+                AddQueueItemIfExists(items, shots, "Step1_Edge_Template.bmp", "1", "Edge 변환", "템플릿 이미지");
+                AddQueueItemIfExists(items, shots, "Step2_Match025.bmp", "2", "0.25× 매칭", "검색 영역 + Bounding Box");
+                AddQueueSearchAreaPair(items, shots, "3", "×1.0", new[] { "Step3_SearchArea", "Step3_Pre1_0" }, new[] { "Step3_Template" });
+                AddQueueItemIfExists(items, shots, "Step3_Match1_0.bmp", "3", "1.0× 매칭", "매칭 영역 + 빨간 중심점",
+                    focus: FocusInSearchImage(1.0));
+                AddQueueRefineLinesStep(items, shots, "4");
+            }
+            else
+            {
+                txtProcessHeader.Text = settings?.Mode == AlignMode.Coarse ? "Coarse Align 과정" : "처리 과정";
+                AddQueueSearchAreaPair(items, shots, "1", "×0.25", new[] { "Step1_SearchArea" }, new[] { "Step1_Template" });
+                AddQueueSearchAreaPair(items, shots, "3", "×1.0", new[] { "Step3_SearchArea", "Step3_Pre1_0" }, new[] { "Step3_Template" });
+                AddQueueRefineLinesStep(items, shots, "R");
+            }
+
+            lstProcessSteps.ItemsSource = items;
+            if (items.Count > 0)
+                lstProcessSteps.SelectedIndex = items.Count - 1;
+        }
+
+        private void AddQueueSearchAreaPair(
+            List<ProcessStepItem> items, ProcessImageQueue shots,
+            string badge, string scaleLabel, string[] searchStems, string[] templateStems)
+        {
+            AddQueueSearchAreaPairRow(items, shots, badge, "검색 영역", scaleLabel + " 원본", searchStems, templateStems, "_Normal.bmp");
+            AddQueueSearchAreaPairRow(items, shots, badge, "검색 영역", scaleLabel + " Edge", searchStems, templateStems, "_Edge.bmp");
+        }
+
+        private void AddQueueSearchAreaPairRow(
+            List<ProcessStepItem> items, ProcessImageQueue shots,
+            string badge, string title, string subtitle,
+            string[] searchStems, string[] templateStems, string suffix)
+        {
+            BitmapSource search = FirstExistingQueue(shots, searchStems, suffix);
+            BitmapSource template = FirstExistingQueue(shots, templateStems, suffix);
+            if (search == null && template == null) return;
+            items.Add(new ProcessStepItem
+            {
+                StepBadge = badge, Title = title, Subtitle = subtitle, BadgeBrush = StepBadgeBrush,
+                InMemorySource = search ?? template,
+                InMemoryRightSource = search != null ? template : null
+            });
+        }
+
+        private BitmapSource FirstExistingQueue(ProcessImageQueue shots, string[] stems, string suffix)
+        {
+            if (stems == null) return null;
+            for (int i = 0; i < stems.Length; i++)
+            {
+                var mat = shots.TryGet(stems[i] + suffix);
+                if (mat != null) return ToBitmapSource(mat);
+            }
+            return null;
+        }
+
+        private bool AddQueueItemIfExists(
+            List<ProcessStepItem> items, ProcessImageQueue shots,
+            string fileName, string badge, string title, string subtitle,
+            (double x, double y)? focus = null,
+            string rightFileName = null)
+        {
+            var mat = shots.TryGet(fileName);
+            if (mat == null) return false;
+            var rightMat = rightFileName != null ? shots.TryGet(rightFileName) : null;
+            var item = new ProcessStepItem
+            {
+                StepBadge = badge, Title = title, Subtitle = subtitle, BadgeBrush = StepBadgeBrush,
+                InMemorySource = ToBitmapSource(mat),
+                InMemoryRightSource = rightMat != null ? ToBitmapSource(rightMat) : null
+            };
+            if (focus.HasValue) { item.FocusX = focus.Value.x; item.FocusY = focus.Value.y; item.HasFocus = true; }
+            items.Add(item);
+            return true;
+        }
+
+        private void AddQueueRefineLinesStep(List<ProcessStepItem> items, ProcessImageQueue shots, string badge)
+        {
+            AddQueueItemIfExists(items, shots, "Step4_Refine_ROI.bmp", badge, "Refine ROI", "매칭 영역 Crop",
+                rightFileName: "Step4_RefineInput.bmp");
+            AddQueueItemIfExists(items, shots, "Step4_Refine_Edges.bmp", badge, "Refine Edges", "V(파랑) / H(초록) 에지 포인트");
+            AddQueueItemIfExists(items, shots, "Step4_Refine_FitLines.bmp", badge, "Refine FitLines", "V/H FitLine + 교점(빨강)");
+
+            if (!AddQueueItemIfExists(items, shots, "Step4_RefineLines.bmp", badge,
+                    "Refine Result", "교점 중심 50×50", rightFileName: "Step4_RefineInput.bmp"))
+                return;
+            var last = items[items.Count - 1];
+            last.LeftLabel = "Lines";
+            last.RightLabel = "Input";
+        }
+
         private void SetUiEnabled(bool enabled)
         {
             bool imagesReady = sourceImage != null && templateImage != null && settings != null;
@@ -1412,13 +1613,12 @@ namespace TMTestWpfApp
             btnCropSource.IsEnabled = enabled && !_batchRunning && sourceImage != null;
             cboMatchType.IsEnabled = enabled && !_batchRunning;
             txtThreshold.IsEnabled = enabled && !_batchRunning;
-            chkUseEdge.IsEnabled = enabled && !_batchRunning;
             txtEdgeWeight.IsEnabled = enabled && !_batchRunning;
             txtNormalWeight.IsEnabled = enabled && !_batchRunning;
             txtFineSearchSize.IsEnabled = enabled && !_batchRunning;
             chkUseIntersection.IsEnabled = enabled && !_batchRunning;
+            panelKeyDir.IsEnabled = enabled && !_batchRunning && chkUseIntersection?.IsChecked == true;
             chkSaveImages.IsEnabled = enabled && !_batchRunning;
-            cboKeyDir.IsEnabled = enabled && !_batchRunning;
             btnStopBatch.IsEnabled = _batchRunning;
             bool histOk = (!string.IsNullOrEmpty(_lastHistoryFolder) && Directory.Exists(_lastHistoryFolder))
                 || (!string.IsNullOrEmpty(_batchRootFolder) && Directory.Exists(_batchRootFolder));
@@ -1429,6 +1629,51 @@ namespace TMTestWpfApp
         {
             if (mat == null || mat.IsEmpty) return;
             CvInvoke.Imwrite(filePath, mat);
+        }
+    }
+
+    public enum LogLevel { Info, Error }
+
+    public class LogEntry
+    {
+        public DateTime Time { get; }
+        public LogLevel Level { get; }
+        public string Message { get; }
+
+        public LogEntry(DateTime time, LogLevel level, string message)
+        {
+            Time = time;
+            Level = level;
+            Message = message;
+        }
+
+        public string ToStampedLine() =>
+            $"[{Time:HH:mm:ss.fff}] {Message}";
+
+        private static readonly string[] _errorKeywords =
+            { "fail", "error", "abort", "failed", "exception", "FAIL", "STOP" };
+
+        /// <summary>Stamp 포맷([HH:mm:ss.fff] msg) 텍스트를 LogEntry 목록으로 파싱.</summary>
+        public static List<LogEntry> ParseLines(string text)
+        {
+            var result = new List<LogEntry>();
+            if (string.IsNullOrEmpty(text)) return result;
+            foreach (var line in text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                DateTime ts = DateTime.MinValue;
+                string msg = line;
+                if (line.Length > 15 && line[0] == '[' && line[13] == ']')
+                {
+                    if (DateTime.TryParseExact(line.Substring(1, 12), "HH:mm:ss.fff",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out ts))
+                        msg = line.Length > 15 ? line.Substring(15) : "";
+                }
+                var level = _errorKeywords.Any(k => msg.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0)
+                    ? LogLevel.Error : LogLevel.Info;
+                result.Add(new LogEntry(ts, level, msg));
+            }
+            return result;
         }
     }
 }

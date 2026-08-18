@@ -34,8 +34,7 @@ namespace TMTestWpfApp
             ToTop
         }
 
-        private const int EdgeRefineInterval = 3;
-        private const int EdgeRefineLevel = 60;
+        // ponytail: zoomFactor는 호출 시 전달 (0=off, 2, 4). EdgeRefine 파라미터도 호출 시 전달.
 
         /// <summary>템플릿 매칭 중심을 V/H 에지 교점으로 정밀화. 실패 시 입력 좌표 유지.</summary>
         public static void RefineAlignKeyCenter(
@@ -48,7 +47,11 @@ namespace TMTestWpfApp
             Action<string> logger = null,
             string historyFolder = null,
             bool saveImages = true,
-            ProcessImageQueue shots = null)
+            ProcessImageQueue shots = null,
+            int zoomFactor = 0,
+            int edgeInterval = 3,
+            int edgeLevel = 60,
+            double edgeSearchRatio = 0.6667)
         {
             if (source == null) return;
             if (!saveImages)
@@ -73,26 +76,77 @@ namespace TMTestWpfApp
             {
                 GetAlignKeyEdgeSearchDirs(dir, out eEdgeSearchDir searchDirV, out eEdgeSearchDir searchDirH);
 
-                var roi = new DrawingRectF(0, 0, matchCrop.Width, matchCrop.Height);
-                if (!TryGetCornerIntersection(matchCrop, roi, searchDirV, searchDirH,
-                    out DrawingPointF localCorner, out FitLine2D lineV, out FitLine2D lineH,
-                    out List<DrawingPointF> edgesV, out List<DrawingPointF> edgesH))
+                if (zoomFactor >= 2)
                 {
-                    logger?.Invoke($"[{dir}] Edge corner refine failed — keep template center " +
-                                   $"({templateCenterX:F2}, {templateCenterY:F2})");
-                    return;
+                    int cropW = matchCrop.Width;
+                    int cropH = matchCrop.Height;
+                    int innerW = cropW / zoomFactor;
+                    int innerH = cropH / zoomFactor;
+
+                    if (innerW < 3 || innerH < 3)
+                    {
+                        logger?.Invoke($"[{dir}] Edge corner refine skipped (zoom crop too small {innerW}x{innerH}) — keep template center");
+                        return;
+                    }
+
+                    var centerCropRect = CenterRect(cropW / 2, cropH / 2, innerW, innerH, cropW, cropH);
+
+                    using (Image<Gray, byte> centerCrop = matchCrop.Copy(centerCropRect))
+                    using (Image<Gray, byte> zoomed = centerCrop.Resize(cropW, cropH, Inter.Linear))
+                    {
+                        var roi = new DrawingRectF(0, 0, zoomed.Width, zoomed.Height);
+                        if (!TryGetCornerIntersection(zoomed, roi, searchDirV, searchDirH,
+                            edgeInterval, edgeLevel, edgeSearchRatio,
+                            out DrawingPointF localCorner, out FitLine2D lineV, out FitLine2D lineH,
+                            out List<DrawingPointF> edgesV, out List<DrawingPointF> edgesH))
+                        {
+                            logger?.Invoke($"[{dir}] Edge corner refine failed — keep template center " +
+                                           $"({templateCenterX:F2}, {templateCenterY:F2})");
+                            return;
+                        }
+
+                        shots?.Add("Step4_RefineInput.bmp", zoomed);
+                        MatchHistory.SaveRefineDetail(zoomed, localCorner, lineV, lineH, edgesV, edgesH,
+                            roi, shots);
+                        MatchHistory.SaveRefineFitLines(zoomed, localCorner, shots, historyFolder);
+
+                        double convergX = centerCropRect.Left + localCorner.X / zoomFactor;
+                        double convergY = centerCropRect.Top + localCorner.Y / zoomFactor;
+                        dAlignKeyCenterX = matchRect.Left + convergX;
+                        dAlignKeyCenterY = matchRect.Top + convergY;
+
+                        logger?.Invoke($"[{dir}] Edge corner refine (zoom x{zoomFactor}): " +
+                                       $"template=({templateCenterX:F2}, {templateCenterY:F2}) → " +
+                                       $"corner=({dAlignKeyCenterX:F2}, {dAlignKeyCenterY:F2}) " +
+                                       $"dirs=({searchDirV}, {searchDirH})");
+                    }
                 }
+                else
+                {
+                    var roi = new DrawingRectF(0, 0, matchCrop.Width, matchCrop.Height);
+                    if (!TryGetCornerIntersection(matchCrop, roi, searchDirV, searchDirH,
+                        edgeInterval, edgeLevel, edgeSearchRatio,
+                        out DrawingPointF localCorner, out FitLine2D lineV, out FitLine2D lineH,
+                        out List<DrawingPointF> edgesV, out List<DrawingPointF> edgesH))
+                    {
+                        logger?.Invoke($"[{dir}] Edge corner refine failed — keep template center " +
+                                       $"({templateCenterX:F2}, {templateCenterY:F2})");
+                        return;
+                    }
 
-                MatchHistory.SaveRefineFitLines(
-                    matchCrop, lineV, lineH, localCorner, shots, historyFolder);
+                    shots?.Add("Step4_RefineInput.bmp", matchCrop);
+                    MatchHistory.SaveRefineDetail(matchCrop, localCorner, lineV, lineH, edgesV, edgesH,
+                        roi, shots);
+                    MatchHistory.SaveRefineFitLines(matchCrop, localCorner, shots, historyFolder);
 
-                dAlignKeyCenterX = matchRect.Left + localCorner.X;
-                dAlignKeyCenterY = matchRect.Top + localCorner.Y;
+                    dAlignKeyCenterX = matchRect.Left + localCorner.X;
+                    dAlignKeyCenterY = matchRect.Top + localCorner.Y;
 
-                logger?.Invoke($"[{dir}] Edge corner refine: " +
-                               $"template=({templateCenterX:F2}, {templateCenterY:F2}) → " +
-                               $"corner=({dAlignKeyCenterX:F2}, {dAlignKeyCenterY:F2}) " +
-                               $"dirs=({searchDirV}, {searchDirH})");
+                    logger?.Invoke($"[{dir}] Edge corner refine: " +
+                                   $"template=({templateCenterX:F2}, {templateCenterY:F2}) → " +
+                                   $"corner=({dAlignKeyCenterX:F2}, {dAlignKeyCenterY:F2}) " +
+                                   $"dirs=({searchDirV}, {searchDirH})");
+                }
             }
         }
 
@@ -190,6 +244,9 @@ namespace TMTestWpfApp
             DrawingRectF roi,
             eEdgeSearchDir searchDirV,
             eEdgeSearchDir searchDirH,
+            int edgeInterval,
+            int edgeLevel,
+            double edgeSearchRatio,
             out DrawingPointF intersection,
             out FitLine2D lineV,
             out FitLine2D lineH,
@@ -204,8 +261,8 @@ namespace TMTestWpfApp
             if (image == null || roi.Width < 3 || roi.Height < 3)
                 return false;
 
-            edgesV = FindEdges(image, roi, searchDirV, false, EdgeRefineInterval, EdgeRefineLevel);
-            edgesH = FindEdges(image, roi, searchDirH, false, EdgeRefineInterval, EdgeRefineLevel);
+            edgesV = FindEdges(image, roi, searchDirV, false, edgeInterval, edgeLevel, edgeSearchRatio);
+            edgesH = FindEdges(image, roi, searchDirH, false, edgeInterval, edgeLevel, edgeSearchRatio);
 
             if (edgesV.Count == 0 || edgesH.Count == 0)
                 return false;
@@ -221,7 +278,8 @@ namespace TMTestWpfApp
             eEdgeSearchDir eDir,
             bool bMedianBlur,
             int nInterval,
-            int nEdgeScore)
+            int nEdgeScore,
+            double edgeSearchRatio = 0.6667)
         {
             var tempList = new List<DrawingPointF>();
             Mat matInsp = null;
@@ -271,7 +329,7 @@ namespace TMTestWpfApp
                 CvInvoke.Filter2D(matAdjust, matSubAdjust1, sobel1, anchor, 0, BorderType.Default);
                 CvInvoke.Filter2D(matAdjust, matSubAdjust2, sobel2, anchor, 0, BorderType.Default);
 
-                tempList = GetEdgePoint(matSubAdjust1, matSubAdjust2, eDir, ptShifted, nEdgeScore);
+                tempList = GetEdgePoint(matSubAdjust1, matSubAdjust2, eDir, ptShifted, nEdgeScore, edgeSearchRatio);
                 return RemoveEdgeOutlier(tempList, eDir, nInterval);
             }
             catch
@@ -290,7 +348,8 @@ namespace TMTestWpfApp
         }
 
         private static List<DrawingPointF> GetEdgePoint(
-            Mat mat1, Mat mat2, eEdgeSearchDir eDir, DrawingPointF ptShifted, int nEdgeScore)
+            Mat mat1, Mat mat2, eEdgeSearchDir eDir, DrawingPointF ptShifted, int nEdgeScore,
+            double edgeSearchRatio = 0.6667)
         {
             var result = new List<DrawingPointF>();
             byte[] image1Array = mat1.GetRawData();
@@ -301,9 +360,8 @@ namespace TMTestWpfApp
             int startX = 0, endX = nWidth;
             int startY = 0, endY = nHeight;
 
-            double ratio = 0.6666666;
-            int rangeX = (int)(nWidth * ratio);
-            int rangeY = (int)(nHeight * ratio);
+            int rangeX = (int)(nWidth * edgeSearchRatio);
+            int rangeY = (int)(nHeight * edgeSearchRatio);
 
             switch (eDir)
             {

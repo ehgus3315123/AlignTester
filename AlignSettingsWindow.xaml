@@ -1,7 +1,7 @@
 <Window x:Class="TMTestWpfApp.AlignSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Align 설정" Height="640" Width="640"
+        Title="Align 설정" Height="780" Width="700"
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
     <Window.Resources>
         <Style TargetType="CheckBox">
@@ -12,6 +12,12 @@
             <Setter Property="Margin" Value="0,0,8,0"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style x:Key="HintText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="#888888"/>
+            <Setter Property="Margin" Value="0,1,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
     </Window.Resources>
 
@@ -39,9 +45,9 @@
                         </StackPanel>
 
                         <StackPanel x:Name="panelFine" Visibility="Collapsed">
-                            <CheckBox x:Name="chkUseEdge" Content="TemplateMatchUseEdge (ConvertToEdge ⊕ Normal 가중 합산)"
-                                      Checked="UseEdge_Changed" Unchecked="UseEdge_Changed"/>
-                            <TextBlock Text="Edge: Gaussian(k=5,σ=1) → 7×7 box-gradient."
+                            <TextBlock Text="EdgeTemplateMatching: ConvertToEdge ⊕ Normal 가중 합산 (항상 사용)"
+                                       FontSize="13" Margin="0,0,0,4"/>
+                            <TextBlock Text="Edge: Gaussian(k=3,σ=1) → 7×7 box-gradient."
                                        Margin="0,4,0,8" FontSize="11" Foreground="#666666" TextWrapping="Wrap"/>
 
                             <StackPanel x:Name="panelEdgeWeights" Orientation="Horizontal" Margin="0,0,0,10">
@@ -57,8 +63,6 @@
                                 <TextBlock Text="  px (초기 탐색 창)" Style="{StaticResource ParamLabel}" Foreground="#888888"/>
                             </StackPanel>
 
-                            <CheckBox x:Name="chkUseMatchScale2" Content="x1.0 매칭 후 x2.0 매칭"
-                                      Margin="0,8,0,0"/>
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
@@ -67,14 +71,44 @@
                                       Checked="UseIntersection_Changed" Unchecked="UseIntersection_Changed"/>
                         </StackPanel>
 
-                        <StackPanel x:Name="panelKeyDir" Orientation="Horizontal" Margin="0,8,0,0">
-                            <TextBlock Text="AlignKeyDir" Style="{StaticResource ParamLabel}"/>
-                            <ComboBox x:Name="cboKeyDir" Width="140" SelectedIndex="0">
-                                <ComboBoxItem Content="LeftTop"/>
-                                <ComboBoxItem Content="LeftBottom"/>
-                                <ComboBoxItem Content="RightTop"/>
-                                <ComboBoxItem Content="RightBottom"/>
-                            </ComboBox>
+                        <StackPanel x:Name="panelRefineParams" Margin="0,8,0,0">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock Text="AlignKeyDir" Style="{StaticResource ParamLabel}"/>
+                                <ComboBox x:Name="cboKeyDir" Width="140" SelectedIndex="0">
+                                    <ComboBoxItem Content="LeftTop"/>
+                                    <ComboBoxItem Content="LeftBottom"/>
+                                    <ComboBoxItem Content="RightTop"/>
+                                    <ComboBoxItem Content="RightBottom"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock Text="RefineZoom" Style="{StaticResource ParamLabel}"/>
+                                <ComboBox x:Name="cboRefineZoom" Width="80" SelectedIndex="0">
+                                    <ComboBoxItem Content="0 (없음)"/>
+                                    <ComboBoxItem Content="2×"/>
+                                    <ComboBoxItem Content="4×"/>
+                                </ComboBox>
+                                <TextBlock Text="  중심 1/N crop → 원본 크기 resize" Style="{StaticResource HintText}" Margin="10,0,0,0"/>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock Text="EdgeLevel" Style="{StaticResource ParamLabel}"/>
+                                <TextBox x:Name="txtEdgeLevel" Width="60" Text="60"/>
+                                <TextBlock Text="  Sobel 응답 임계값 (기본 60)" Style="{StaticResource HintText}" Margin="10,0,0,0"/>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock Text="EdgeInterval" Style="{StaticResource ParamLabel}"/>
+                                <TextBox x:Name="txtEdgeInterval" Width="60" Text="3"/>
+                                <TextBlock Text="  아웃라이어 제거 허용 범위 px (기본 3)" Style="{StaticResource HintText}" Margin="10,0,0,0"/>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="EdgeSearchRatio" Style="{StaticResource ParamLabel}"/>
+                                <TextBox x:Name="txtEdgeSearchRatio" Width="60" Text="0.6667"/>
+                                <TextBlock Text="  에지 탐색 범위 비율 0.0〜1.0 (기본 0.6667)" Style="{StaticResource HintText}" Margin="10,0,0,0"/>
+                            </StackPanel>
                         </StackPanel>
 
                         <CheckBox x:Name="chkSaveImages" Content="처리 이미지 저장 (SearchArea / 매칭 / Refine)"

@@ -18,9 +18,13 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                               FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center"/>
+                               FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
                     <StackPanel x:Name="ZoomToolbar" Grid.Column="1" Orientation="Horizontal"
                                 Visibility="Collapsed" VerticalAlignment="Center">
+                        <CheckBox Content="고정" FontSize="10" VerticalAlignment="Center"
+                                  Margin="0,0,8,0" ToolTip="Zoom 고정: 새 이미지 로드해도 현재 Zoom 배율 유지"
+                                  IsChecked="{Binding LockZoom, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
                         <TextBlock x:Name="txtZoomLevel" Text="Fit" FontSize="10" Foreground="#555"
                                    VerticalAlignment="Center" Margin="0,0,6,0" MinWidth="52"
                                    TextAlignment="Right"/>

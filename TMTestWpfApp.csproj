@@ -195,9 +195,6 @@
     <Compile Include="AlignKeyRefiner.cs">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="PreprocessPipeline.cs">
-      <SubType>Code</SubType>
-    </Compile>
     <Compile Include="MatchingPipeline.cs">
       <SubType>Code</SubType>
     </Compile>

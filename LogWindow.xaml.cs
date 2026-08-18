@@ -1,5 +1,5 @@
+using System.Collections.Generic;
 using System.Windows;
-using System.Windows.Documents;
 
 namespace TMTestWpfApp
 {
@@ -10,18 +10,26 @@ namespace TMTestWpfApp
             InitializeComponent();
         }
 
-        public void SetText(string text)
+        public void SetEntries(List<LogEntry> entries)
         {
-            var p = new Paragraph(new Run(text ?? ""))
-            {
-                LineHeight = 30,
-                Margin = new Thickness(0)
-            };
-            txtLog.Document.Blocks.Clear();
-            txtLog.Document.Blocks.Add(p);
-            // ponytail: PageWidth 고정으로 wrap 끔. 긴 줄은 가로 스크롤.
-            txtLog.Document.PageWidth = 20000;
-            txtLog.ScrollToEnd();
+            dgLog.ItemsSource = null;
+            dgLog.ItemsSource = entries?.ConvertAll(e => new LogRow(e));
+            if (dgLog.Items.Count > 0)
+                dgLog.ScrollIntoView(dgLog.Items[dgLog.Items.Count - 1]);
+        }
+    }
+
+    public class LogRow
+    {
+        public LogLevel Level { get; }
+        public string TimeStr { get; }
+        public string Message { get; }
+
+        public LogRow(LogEntry e)
+        {
+            Level = e.Level;
+            TimeStr = e.Time == System.DateTime.MinValue ? "" : e.Time.ToString("HH:mm:ss.fff");
+            Message = e.Message;
         }
     }
 }

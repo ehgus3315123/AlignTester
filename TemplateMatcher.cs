@@ -166,10 +166,10 @@ namespace TMTestWpfApp
             return result;
         }
 
-        /// <summary>Gaussian → 7x7 box-gradient 4방향 에지. 기본 k=5, σ=1 (원본 ConvertToEdge).</summary>
+        /// <summary>Gaussian → 7x7 box-gradient 4방향 에지. 기본 k=3, σ=1 (원본 ConvertToEdge).</summary>
         public static Image<Gray, byte> ConvertToEdge(
             Image<Gray, byte> inputImage,
-            int gaussianKernelSize = 5,
+            int gaussianKernelSize = 3,
             double gaussianSigma = 1.0)
         {
             if (inputImage == null) return null;
